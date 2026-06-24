@@ -36,6 +36,16 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "actions@github.com"
           git add data/seen.json
-          git diff --cached --quiet || git commit -m "bot: update seen opportunities $(date +'%Y-%m-%d')"
-          git pull --rebase origin main || true
-          git push
+          git diff --cached --quiet && echo "No seen.json changes to push" && exit 0 || true
+          git commit -m "bot: update seen opportunities $(date +'%Y-%m-%d')"
+          # Conflict-proof push: retry, keeping our seen.json on conflict (-X theirs during rebase)
+          for attempt in 1 2 3 4 5; do
+            if git push origin HEAD:main 2>/dev/null; then
+              echo "Pushed on attempt $attempt"; exit 0
+            fi
+            echo "Push failed (attempt $attempt) - syncing with remote..."
+            git fetch origin main
+            git rebase -X theirs origin/main || git rebase --abort
+            sleep $((RANDOM % 4 + 2))
+          done
+          echo "Could not push seen.json after retries; next run will catch up."

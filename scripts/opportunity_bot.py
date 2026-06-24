@@ -576,17 +576,22 @@ CLASSIFICATION RULES:
 - NOT RELEVANT: Scholarships restricted to categories student doesn't belong to
 - NOT RELEVANT: Positions requiring qualifications student doesn't have (PG, PhD)
 
-Return ONLY relevant opportunity numbers as a comma-separated list (e.g., "1,3,5,7")
-If NONE are relevant, return exactly "NONE"
+Respond with ONLY a JSON object in this exact format, nothing else:
+{{"relevant": [list of relevant opportunity numbers]}}
 
-RELEVANT NUMBERS:"""
+Example: {{"relevant": [1, 3, 5]}}
+If none are relevant: {{"relevant": []}}"""
 
         url = "https://api.groq.com/openai/v1/chat/completions"
         payload = json.dumps({
             "model": GROQ_MODEL,
-            "messages": [{"role": "user", "content": prompt}],
-            "temperature": 0.1,
-            "max_tokens": 100
+            "messages": [
+                {"role": "system", "content": "You are a precise classifier. You respond ONLY with valid JSON, no explanations."},
+                {"role": "user", "content": prompt}
+            ],
+            "temperature": 0.0,
+            "max_tokens": 150,
+            "response_format": {"type": "json_object"}
         })
 
         req = urllib.request.Request(url, data=payload.encode())
@@ -600,15 +605,21 @@ RELEVANT NUMBERS:"""
             with urllib.request.urlopen(req, timeout=30) as resp:
                 result = json.loads(resp.read().decode())
                 answer = result["choices"][0]["message"]["content"].strip()
-                print(f"[INFO] LLM batch {i//batch_size + 1} response: {answer}")
+                print(f"[INFO] LLM batch {i//batch_size + 1}: {answer[:120]}")
 
-                if answer.upper() == "NONE":
-                    continue
+                # Parse JSON response robustly
+                picked = []
+                try:
+                    parsed = json.loads(answer)
+                    picked = parsed.get("relevant", [])
+                except (json.JSONDecodeError, AttributeError):
+                    # Fallback: extract a JSON array if model added stray text
+                    m = re.search(r'"relevant"\s*:\s*\[([0-9,\s]*)\]', answer)
+                    if m:
+                        picked = [int(n) for n in re.findall(r'\d+', m.group(1))]
 
-                # Parse numbers from response
-                numbers = re.findall(r'\d+', answer)
-                for num_str in numbers:
-                    idx = int(num_str) - 1
+                for num in picked:
+                    idx = int(num) - 1
                     if 0 <= idx < len(batch):
                         relevant.append(batch[idx])
 

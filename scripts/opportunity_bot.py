@@ -79,6 +79,20 @@ def make_hash(text):
     return hashlib.md5(text.encode()).hexdigest()
 
 
+def normalize_key(title):
+    """Normalize a title for cross-source dedup.
+
+    The SAME role often appears on multiple sources with tiny differences
+    (case, punctuation, 'INTERN' vs 'Intern', extra spaces). We strip all of
+    that to a canonical key so duplicates collapse to one.
+    """
+    t = title.lower()
+    t = re.sub(r'[^a-z0-9 ]', ' ', t)      # drop punctuation
+    t = re.sub(r'\b(internship|intern|the|a|an|for|at|of|in|to|and)\b', ' ', t)
+    t = re.sub(r'\s+', ' ', t).strip()
+    return t
+
+
 # Keywords that indicate a listing is NOT an opportunity (exam results, keys, etc.)
 JUNK_KEYWORDS = [
     "answer key", "result", "admit card", "hall ticket", "merit list",
@@ -903,13 +917,20 @@ def esc(text):
 
 
 def format_item(index, opp):
-    """Format a single opportunity entry as a Telegram HTML block."""
-    block = f"\n<b>{index}. {esc(opp['title'][:110])}</b>\n"
-    if opp.get("date"):
-        block += f"   \U0001f4c5 <i>{esc(str(opp['date'])[:40])}</i>\n"
-    block += f"   \U0001f517 <a href=\"{opp['link']}\">Apply / Details</a>"
-    block += f"  \u00b7  <i>{esc(opp['source'])}</i>\n"
-    return block
+    """Format a single opportunity as a COMPACT one-line Telegram entry.
+
+    Layout:  N. <a href=link>Title</a> · meta · source
+    (meta = location/date if present). Keeps messages small so more items fit.
+    """
+    title = esc(opp["title"][:95])
+    line = f"{index}. <a href=\"{opp['link']}\">{title}</a>"
+
+    meta = opp.get("description") or opp.get("date") or ""
+    meta = esc(str(meta).strip()[:35])
+    if meta:
+        line += f" \u00b7 {meta}"
+    line += f" \u00b7 <i>{esc(opp['source'])}</i>\n"
+    return line
 
 
 def send_category(category, items):
@@ -1022,6 +1043,20 @@ def main():
     all_opportunities = [o for o in all_opportunities if not is_junk(o["title"])]
     print(f"[INFO] Removed {before - len(all_opportunities)} junk listings "
           f"(results/answer-keys/admit-cards). Kept {len(all_opportunities)}")
+
+    # ---- Cross-source dedup (same role appearing on multiple sources) ----
+    before = len(all_opportunities)
+    deduped = []
+    seen_keys = set()
+    for opp in all_opportunities:
+        key = normalize_key(opp["title"])
+        if key and key in seen_keys:
+            continue
+        seen_keys.add(key)
+        deduped.append(opp)
+    all_opportunities = deduped
+    print(f"[INFO] Removed {before - len(all_opportunities)} cross-source duplicates. "
+          f"Kept {len(all_opportunities)}")
 
     # ---- Deduplicate against seen ----
     new_opportunities = []

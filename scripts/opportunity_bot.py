@@ -782,7 +782,7 @@ CATEGORY_META = {
 CATEGORY_ORDER = ["INTERNSHIP", "HACKATHON", "COMPETITION", "FELLOWSHIP",
                   "SCHOLARSHIP", "GOV JOB", "OPPORTUNITY"]
 
-MAX_PER_CATEGORY = 8   # cap items shown per category to keep messages readable
+MAX_MSG_CHARS = 3500   # safe budget under Telegram's 4096-char per-message limit
 
 
 def esc(text):
@@ -790,26 +790,38 @@ def esc(text):
     return text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
 
 
-def build_category_message(category, items):
-    """Build one clean Telegram message for all items in a category."""
+def format_item(index, opp):
+    """Format a single opportunity entry as a Telegram HTML block."""
+    block = f"\n<b>{index}. {esc(opp['title'][:110])}</b>\n"
+    if opp.get("date"):
+        block += f"   \U0001f4c5 <i>{esc(str(opp['date'])[:40])}</i>\n"
+    block += f"   \U0001f517 <a href=\"{opp['link']}\">Apply / Details</a>"
+    block += f"  \u00b7  <i>{esc(opp['source'])}</i>\n"
+    return block
+
+
+def send_category(category, items):
+    """Send ALL items of a category to Telegram, splitting across multiple
+    messages when needed to stay under Telegram's per-message size limit."""
     emoji, label = CATEGORY_META.get(category, ("\U0001f4cc", category.title()))
-    shown = items[:MAX_PER_CATEGORY]
+    total = len(items)
 
-    msg = f"{emoji} <b>{label.upper()}</b>  ({len(items)} new)\n"
-    msg += "\u2501" * 18 + "\n"
+    header = f"{emoji} <b>{label.upper()}</b>  ({total} new)\n" + "\u2501" * 18 + "\n"
+    msg = header
+    part = 1
 
-    for i, opp in enumerate(shown, 1):
-        title = esc(opp["title"][:90])
-        msg += f"\n<b>{i}. {title}</b>\n"
-        if opp.get("date"):
-            msg += f"   \U0001f4c5 <i>{esc(str(opp['date'])[:40])}</i>\n"
-        msg += f"   \U0001f517 <a href=\"{opp['link']}\">Apply / Details</a>"
-        msg += f"  \u00b7  <i>{esc(opp['source'])}</i>\n"
+    for i, opp in enumerate(items, 1):
+        block = format_item(i, opp)
+        # If adding this block would exceed the budget, flush current message first
+        if len(msg) + len(block) > MAX_MSG_CHARS:
+            send_telegram(msg)
+            part += 1
+            msg = f"{emoji} <b>{label.upper()}</b>  (contd. {part})\n" + "\u2501" * 18 + "\n" + block
+        else:
+            msg += block
 
-    if len(items) > MAX_PER_CATEGORY:
-        msg += f"\n\u2795 <i>+{len(items) - MAX_PER_CATEGORY} more {label.lower()}</i>"
-
-    return msg
+    if msg.strip():
+        send_telegram(msg)
 
 
 def send_digest(relevant, total_new):
@@ -828,10 +840,10 @@ def send_digest(relevant, total_new):
     header += f"\n\U0001f4ca <b>{len(relevant)}</b> relevant out of {total_new} new"
     send_telegram(header)
 
-    # ---- One message per category ----
+    # ---- All items per category (auto-split into multiple messages) ----
     for cat in CATEGORY_ORDER:
         if cat in grouped:
-            send_telegram(build_category_message(cat, grouped[cat]))
+            send_category(cat, grouped[cat])
 
 
 def main():

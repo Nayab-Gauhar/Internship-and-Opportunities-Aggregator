@@ -508,10 +508,10 @@ RELEVANT_KEYWORDS = [
     "software", "developer", "comput", "cse", "data scien", "data analy",
     "machine learning", "deep learning", " ai ", "a.i", "artificial intelligence",
     " ml ", "ml ", "nlp", "computer vision", "llm", "python", "java", "c++",
-    "web", "app dev", "android", "ios", "full stack", "backend", "frontend",
+    "web dev", "app dev", "android", "ios", "full stack", "backend", "frontend",
     "programmer", "programming", "coding", "cyber", "security", "cloud",
     "engineer", "engineering", "b.tech", "b.e", "btech", "iot", "robotics",
-    "research", "jrf", "intern", "technolog", "tech ", "information technology",
+    "research", "jrf", "technolog", "information technology",
     "embedded", "vlsi", "electronics", "blockchain", "devops", "analytics",
 ]
 
@@ -592,6 +592,9 @@ RELEVANT NUMBERS:"""
         req = urllib.request.Request(url, data=payload.encode())
         req.add_header("Authorization", f"Bearer {GROQ_API_KEY}")
         req.add_header("Content-Type", "application/json")
+        # Groq's API is behind Cloudflare, which blocks the default Python urllib
+        # User-Agent (causes "403 error code: 1010"). A browser UA avoids the block.
+        req.add_header("User-Agent", "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0 Safari/537.36")
 
         try:
             with urllib.request.urlopen(req, timeout=30) as resp:
@@ -636,29 +639,69 @@ RELEVANT NUMBERS:"""
 # MAIN
 # ============================================================
 
-def format_message(opp):
-    """Format a single opportunity for Telegram."""
-    emoji_map = {
-        "GOV JOB": "\U0001f3db\ufe0f",
-        "SCHOLARSHIP": "\U0001f393",
-        "FELLOWSHIP": "\U0001f52c",
-        "HACKATHON": "\U0001f680",
-        "INTERNSHIP": "\U0001f4bc",
-        "COMPETITION": "\U0001f3c6",
-    }
-    emoji = emoji_map.get(opp["category"], "\U0001f4cc")
+CATEGORY_META = {
+    "INTERNSHIP":  ("\U0001f4bc", "Internships"),
+    "HACKATHON":   ("\U0001f680", "Hackathons"),
+    "COMPETITION": ("\U0001f3c6", "Competitions"),
+    "FELLOWSHIP":  ("\U0001f52c", "Fellowships"),
+    "SCHOLARSHIP": ("\U0001f393", "Scholarships"),
+    "GOV JOB":     ("\U0001f3db\ufe0f", "Government Jobs"),
+    "OPPORTUNITY": ("\U0001f4cc", "Other Opportunities"),
+}
+# Order in which categories appear in the digest (most relevant first)
+CATEGORY_ORDER = ["INTERNSHIP", "HACKATHON", "COMPETITION", "FELLOWSHIP",
+                  "SCHOLARSHIP", "GOV JOB", "OPPORTUNITY"]
 
-    msg = f"{emoji} <b>[{opp['category']}]</b>\n"
-    msg += f"<b>{opp['title']}</b>\n"
-    if opp["description"]:
-        # Escape HTML entities
-        desc = opp["description"].replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
-        msg += f"{desc[:150]}\n"
-    if opp["date"]:
-        msg += f"\U0001f4c5 {opp['date']}\n"
-    msg += f"\U0001f517 <a href=\"{opp['link']}\">Apply / Details</a>\n"
-    msg += f"<i>via {opp['source']}</i>"
+MAX_PER_CATEGORY = 8   # cap items shown per category to keep messages readable
+
+
+def esc(text):
+    """Escape HTML special chars for Telegram HTML parse mode."""
+    return text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+
+
+def build_category_message(category, items):
+    """Build one clean Telegram message for all items in a category."""
+    emoji, label = CATEGORY_META.get(category, ("\U0001f4cc", category.title()))
+    shown = items[:MAX_PER_CATEGORY]
+
+    msg = f"{emoji} <b>{label.upper()}</b>  ({len(items)} new)\n"
+    msg += "\u2501" * 18 + "\n"
+
+    for i, opp in enumerate(shown, 1):
+        title = esc(opp["title"][:90])
+        msg += f"\n<b>{i}. {title}</b>\n"
+        if opp.get("date"):
+            msg += f"   \U0001f4c5 <i>{esc(str(opp['date'])[:40])}</i>\n"
+        msg += f"   \U0001f517 <a href=\"{opp['link']}\">Apply / Details</a>"
+        msg += f"  \u00b7  <i>{esc(opp['source'])}</i>\n"
+
+    if len(items) > MAX_PER_CATEGORY:
+        msg += f"\n\u2795 <i>+{len(items) - MAX_PER_CATEGORY} more {label.lower()}</i>"
+
     return msg
+
+
+def send_digest(relevant, total_new):
+    """Group opportunities by category and send a clean digest to Telegram."""
+    grouped = {}
+    for opp in relevant:
+        grouped.setdefault(opp["category"], []).append(opp)
+
+    # ---- Summary header with per-category breakdown ----
+    header = "\U0001f514 <b>New Opportunities for You!</b>\n"
+    header += f"\U0001f4c6 <i>{datetime.now().strftime('%d %b %Y, %I:%M %p')}</i>\n\n"
+    for cat in CATEGORY_ORDER:
+        if cat in grouped:
+            emoji, label = CATEGORY_META[cat]
+            header += f"{emoji} {label}: <b>{len(grouped[cat])}</b>\n"
+    header += f"\n\U0001f4ca <b>{len(relevant)}</b> relevant out of {total_new} new"
+    send_telegram(header)
+
+    # ---- One message per category ----
+    for cat in CATEGORY_ORDER:
+        if cat in grouped:
+            send_telegram(build_category_message(cat, grouped[cat]))
 
 
 def main():
@@ -740,23 +783,12 @@ def main():
         save_seen(seen)
         return
 
-    # ---- Send to Telegram ----
-    header = f"\U0001f514 <b>New Opportunities Found!</b>\n"
-    header += f"\U0001f4ca {len(relevant)} relevant out of {len(new_opportunities)} new listings\n"
-    header += f"\U0001f4c6 {datetime.now().strftime('%d %b %Y, %I:%M %p')}"
-    send_telegram(header)
-
-    # Send max 12 per run to avoid Telegram rate limits
-    for opp in relevant[:12]:
-        msg = format_message(opp)
-        send_telegram(msg)
-
-    if len(relevant) > 12:
-        send_telegram(f"\u2795 ...and {len(relevant) - 12} more. Run again or check sources directly!")
+    # ---- Send to Telegram (grouped category digest) ----
+    send_digest(relevant, len(new_opportunities))
 
     # ---- Save updated seen list ----
     save_seen(seen)
-    print(f"\n[DONE] Sent {min(len(relevant), 12)} notifications to Telegram.")
+    print(f"\n[DONE] Sent digest with {len(relevant)} opportunities to Telegram.")
     print(f"[DONE] Total tracked: {len(seen)} opportunities")
 
 

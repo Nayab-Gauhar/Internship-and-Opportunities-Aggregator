@@ -37,6 +37,9 @@ GROQ_API_KEY = os.environ.get("GROQ_API_KEY", "").strip()
 # Groq model - update here if the model gets deprecated (see https://console.groq.com/docs/models)
 GROQ_MODEL = os.environ.get("GROQ_MODEL", "llama-3.1-8b-instant").strip()
 
+# Minimum LLM relevance score (0-10) for an opportunity to be sent. Higher = stricter.
+MIN_RELEVANCE_SCORE = int(os.environ.get("MIN_RELEVANCE_SCORE", "6"))
+
 SEEN_FILE = os.path.join(os.path.dirname(__file__), "..", "data", "seen.json")
 
 # Your profile - LLM uses this to judge relevance
@@ -109,6 +112,36 @@ def is_junk(title):
     """Return True if title is a result/answer-key/admit-card type (not an opportunity)."""
     t = title.lower()
     return any(kw in t for kw in JUNK_KEYWORDS)
+
+
+# Role types the user is explicitly NOT interested in (hard blocklist - dropped
+# before the LLM even sees them, so they can never slip through).
+# Multi-word / long phrases: safe to match as substrings.
+BLOCKLIST_KEYWORDS = [
+    "marketing", "digital marketing", "social media", "human resource",
+    "recruitment", "talent acquisition", "business development",
+    "video editing", "video editor", "content writ", "copywrit", "copy writer",
+    "data entry", "telecalling", "telecaller", "telesales",
+    "customer support", "customer service", "customer care",
+    "graphic design", "graphics design", "founder office", "founder's office",
+    "chief of staff", "brand ambassador", "public relations",
+    "fashion", "photography", "videography", "interior design",
+    "accounting", "bpo", "influencer", "community manager",
+]
+# Short/risky tokens: matched only as whole words (avoids e.g. "Sales" hitting
+# "Salesforce", or "ops" hitting "DevOps").
+BLOCKLIST_WORDS = ["hr", "bd", "mis", "pr", "ba", "sales", "seo", "accounts", "ops"]
+
+
+def is_blocked(title):
+    """Return True if the role is in the user's NOT-interested blocklist."""
+    t = " " + re.sub(r'[^a-z0-9 ]', ' ', title.lower()) + " "
+    t = re.sub(r'\s+', ' ', t)
+    if any(kw in t for kw in BLOCKLIST_KEYWORDS):
+        return True
+    if any(f" {w} " in t for w in BLOCKLIST_WORDS):
+        return True
+    return False
 
 
 def fetch_url(url, headers=None):
@@ -775,19 +808,23 @@ def keyword_relevance(opp):
 
 
 def classify_with_llm(opportunities):
-    """Use Groq LLM to filter relevant opportunities based on user profile.
+    """Score each opportunity 0-10 for relevance to the user, keep those scoring
+    >= MIN_RELEVANCE_SCORE, and return them sorted best-first (with `_score` set).
 
-    Falls back to keyword_relevance() when the LLM is unavailable or errors out,
-    so the bot never floods Telegram with everything.
+    Falls back to keyword_relevance() when the LLM is unavailable or errors out.
     """
     if not opportunities:
         return []
 
     if not GROQ_API_KEY:
         print("[WARN] No GROQ_API_KEY set. Using keyword fallback filter.")
-        return [o for o in opportunities if keyword_relevance(o)]
+        kept = [o for o in opportunities if keyword_relevance(o)]
+        for o in kept:
+            o["_score"] = 0
+        return kept
 
-    print(f"[INFO] Classifying {len(opportunities)} opportunities with Groq LLM...")
+    print(f"[INFO] Scoring {len(opportunities)} opportunities with Groq LLM "
+          f"(threshold {MIN_RELEVANCE_SCORE}/10)...")
 
     relevant = []
     batch_size = 15
@@ -801,9 +838,8 @@ def classify_with_llm(opportunities):
             if opp['description']:
                 listings_text += f" - {opp['description'][:100]}"
 
-        prompt = f"""You are a career opportunity classifier for an Indian engineering student.
-Given the student profile and a list of opportunities, return ONLY the numbers of 
-opportunities that are RELEVANT to this specific student.
+        prompt = f"""You are a career opportunity matcher for an Indian engineering student.
+Score EACH opportunity from 0 to 10 for how relevant it is to THIS student.
 
 STUDENT PROFILE:
 {USER_PROFILE}
@@ -811,31 +847,25 @@ STUDENT PROFILE:
 OPPORTUNITIES:
 {listings_text}
 
-CLASSIFICATION RULES:
-- RELEVANT: CS/IT/AI/ML/tech related jobs, internships in software/AI/data science,
-  engineering scholarships, tech hackathons, coding competitions, research fellowships
-- RELEVANT: Government IT/tech positions (even if seem senior - good to track early)
-- RELEVANT: General engineering scholarships the student is eligible for
-- NOT RELEVANT: MBA/law/medical/agriculture/arts-only roles
-- NOT RELEVANT: Sales, marketing, HR, content writing, video editing internships
-- NOT RELEVANT: Scholarships restricted to categories student doesn't belong to
-- NOT RELEVANT: Positions requiring qualifications student doesn't have (PG, PhD)
+SCORING GUIDE:
+- 9-10: Perfect fit (AI/ML, software, data science, CS research, tech fellowship/scholarship matching their skills)
+- 6-8: Good fit (general software/engineering/tech role, coding hackathon, eligible engineering scholarship)
+- 3-5: Weak/uncertain fit (tangentially technical, or eligibility unclear)
+- 0-2: Not relevant (sales, marketing, HR, content/video, non-tech, MBA/medical/law, needs PhD/PG, ineligible)
 
-Respond with ONLY a JSON object in this exact format, nothing else:
-{{"relevant": [list of relevant opportunity numbers]}}
-
-Example: {{"relevant": [1, 3, 5]}}
-If none are relevant: {{"relevant": []}}"""
+Respond with ONLY a JSON object mapping each opportunity number to its score:
+{{"scores": {{"1": 9, "2": 2, "3": 7}}}}
+Include every number from the list."""
 
         url = "https://api.groq.com/openai/v1/chat/completions"
         payload = json.dumps({
             "model": GROQ_MODEL,
             "messages": [
-                {"role": "system", "content": "You are a precise classifier. You respond ONLY with valid JSON, no explanations."},
+                {"role": "system", "content": "You are a precise scorer. You respond ONLY with valid JSON, no explanations."},
                 {"role": "user", "content": prompt}
             ],
             "temperature": 0.0,
-            "max_tokens": 150,
+            "max_tokens": 300,
             "response_format": {"type": "json_object"}
         })
 
@@ -850,23 +880,24 @@ If none are relevant: {{"relevant": []}}"""
             with urllib.request.urlopen(req, timeout=30) as resp:
                 result = json.loads(resp.read().decode())
                 answer = result["choices"][0]["message"]["content"].strip()
-                print(f"[INFO] LLM batch {i//batch_size + 1}: {answer[:120]}")
+                print(f"[INFO] LLM batch {i//batch_size + 1}: {answer[:140]}")
 
-                # Parse JSON response robustly
-                picked = []
+                scores = {}
                 try:
-                    parsed = json.loads(answer)
-                    picked = parsed.get("relevant", [])
+                    scores = json.loads(answer).get("scores", {})
                 except (json.JSONDecodeError, AttributeError):
-                    # Fallback: extract a JSON array if model added stray text
-                    m = re.search(r'"relevant"\s*:\s*\[([0-9,\s]*)\]', answer)
-                    if m:
-                        picked = [int(n) for n in re.findall(r'\d+', m.group(1))]
+                    # Fallback: pull "num": score pairs out of stray text
+                    for n, s in re.findall(r'"(\d+)"\s*:\s*(\d+)', answer):
+                        scores[n] = int(s)
 
-                for num in picked:
-                    idx = int(num) - 1
-                    if 0 <= idx < len(batch):
-                        relevant.append(batch[idx])
+                for idx, opp in enumerate(batch):
+                    try:
+                        sc = int(scores.get(str(idx + 1), 0))
+                    except (ValueError, TypeError):
+                        sc = 0
+                    if sc >= MIN_RELEVANCE_SCORE:
+                        opp["_score"] = sc
+                        relevant.append(opp)
 
         except urllib.error.HTTPError as e:
             body = ""
@@ -880,14 +911,23 @@ If none are relevant: {{"relevant": []}}"""
                       f"If the model '{GROQ_MODEL}' is deprecated, set a GROQ_MODEL secret "
                       "to a current model from https://console.groq.com/docs/models")
             # Fall back to keyword filter for this batch (don't flood)
-            relevant.extend([o for o in batch if keyword_relevance(o)])
+            for o in batch:
+                if keyword_relevance(o):
+                    o["_score"] = 0
+                    relevant.append(o)
         except Exception as e:
             print(f"[ERROR] Groq API error: {e}")
-            relevant.extend([o for o in batch if keyword_relevance(o)])
+            for o in batch:
+                if keyword_relevance(o):
+                    o["_score"] = 0
+                    relevant.append(o)
 
         time.sleep(2)  # Rate limiting between batches (free tier is strict)
 
-    print(f"[INFO] LLM classified {len(relevant)} as relevant out of {len(opportunities)} total")
+    # Sort best-first by score
+    relevant.sort(key=lambda o: o.get("_score", 0), reverse=True)
+    print(f"[INFO] LLM kept {len(relevant)} of {len(opportunities)} "
+          f"(score >= {MIN_RELEVANCE_SCORE})")
     return relevant
 
 
@@ -923,7 +963,9 @@ def format_item(index, opp):
     (meta = location/date if present). Keeps messages small so more items fit.
     """
     title = esc(opp["title"][:95])
-    line = f"{index}. <a href=\"{opp['link']}\">{title}</a>"
+    # Highlight top matches (LLM score 9-10) with a star
+    star = "\u2b50 " if opp.get("_score", 0) >= 9 else ""
+    line = f"{index}. {star}<a href=\"{opp['link']}\">{title}</a>"
 
     meta = opp.get("description") or opp.get("date") or ""
     meta = esc(str(meta).strip()[:35])
@@ -1043,6 +1085,12 @@ def main():
     all_opportunities = [o for o in all_opportunities if not is_junk(o["title"])]
     print(f"[INFO] Removed {before - len(all_opportunities)} junk listings "
           f"(results/answer-keys/admit-cards). Kept {len(all_opportunities)}")
+
+    # ---- Hard blocklist (marketing/sales/HR/content/video etc. - never wanted) ----
+    before = len(all_opportunities)
+    all_opportunities = [o for o in all_opportunities if not is_blocked(o["title"])]
+    print(f"[INFO] Removed {before - len(all_opportunities)} blocklisted listings "
+          f"(marketing/sales/HR/content/etc.). Kept {len(all_opportunities)}")
 
     # ---- Cross-source dedup (same role appearing on multiple sources) ----
     before = len(all_opportunities)

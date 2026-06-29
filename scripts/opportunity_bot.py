@@ -42,7 +42,7 @@ SEEN_FILE = os.path.join(os.path.dirname(__file__), "..", "data", "seen.json")
 # Your profile - LLM uses this to judge relevance
 USER_PROFILE = """
 - 3rd year B.Tech CSE student (entering 5th semester)
-- College: JIS College of Engineering, West Bengal
+- College: Haldia Institute of Technology, West Bengal
 - Home state: Bihar
 - CGPA: 8.7/10
 - Interests: AI/ML, Computer Vision, Edge AI (Jetson), Agentic AI, LLMs, Deep Learning

@@ -1,6 +1,9 @@
-import os, json, hashlib, re, urllib.request, time, ssl
-import xml.etree.ElementTree as ET
-from datetime import datetime
+import os
+import json
+import hashlib
+import re
+import urllib.request
+import time
 
 SEEN_FILE = os.path.join(os.path.dirname(__file__), "..", "data", "seen.json")
 
@@ -146,3 +149,26 @@ def fetch_url(url, headers=None, retries=2, source_name=None):
     label = source_name or url.split('/')[2]
     _source_errors.append(label)
     return ""
+
+RELEVANT_KEYWORDS = [
+    "software", "developer", "comput", "cse", "data scien", "data analy",
+    "machine learning", "deep learning", " ai ", "a.i", "artificial intelligence",
+    " ml ", "ml ", "nlp", "computer vision", "llm", "python", "java", "c++",
+    "web dev", "app dev", "android", "ios", "full stack", "backend", "frontend",
+    "programmer", "programming", "coding", "cyber", "security", "cloud",
+    "engineer", "engineering", "b.tech", "b.e", "btech", "iot", "robotics",
+    "research", "jrf", "technolog", "information technology",
+    "embedded", "vlsi", "electronics", "blockchain", "devops", "analytics",
+]
+
+# Categories that are always relevant — skip LLM to save quota
+AUTO_APPROVE_CATEGORIES = {"HACKATHON", "COMPETITION", "SCHOLARSHIP", "FELLOWSHIP"}
+
+def keyword_relevance(opp):
+    """Lightweight relevance check used when the LLM is unavailable."""
+    cat = opp["category"]
+    if cat in AUTO_APPROVE_CATEGORIES:
+        return True
+    text = (opp["title"] + " " + opp.get("description", "")).lower()
+    return any(kw in text for kw in RELEVANT_KEYWORDS)
+

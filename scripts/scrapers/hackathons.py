@@ -1,5 +1,5 @@
-import re, json, time
-import xml.etree.ElementTree as ET
+import re
+import json
 from datetime import datetime
 from core.utils import fetch_url
 

@@ -1,6 +1,6 @@
-import re, json, time
+import re
+import json
 import xml.etree.ElementTree as ET
-from datetime import datetime
 from core.utils import fetch_url
 
 def fetch_unstop(category, label):

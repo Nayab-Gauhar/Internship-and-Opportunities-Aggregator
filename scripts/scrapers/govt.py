@@ -1,6 +1,5 @@
-import re, json, time
+import re
 import xml.etree.ElementTree as ET
-from datetime import datetime
 from core.utils import fetch_url
 
 def fetch_govt_jobs():

@@ -8,11 +8,15 @@ Groq LLM, and sends matches to Telegram.
 import os
 import json
 import time
+import re
 import urllib.request
 import urllib.parse
 from datetime import datetime
 
-from core.utils import load_seen, save_seen, make_hash, normalize_key, is_junk, is_blocked
+from core.utils import (
+    load_seen, save_seen, make_hash, normalize_key, is_junk, is_blocked,
+    keyword_relevance, AUTO_APPROVE_CATEGORIES
+)
 from core.telegram import send_digest, send_monthly_reminders
 from scrapers import govt, hackathons, internships, scholarships, fellowships
 

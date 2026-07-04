@@ -45,14 +45,11 @@ SEEN_FILE = os.path.join(os.path.dirname(__file__), "..", "data", "seen.json")
 # Your profile - LLM uses this to judge relevance
 USER_PROFILE = """
 - 3rd year B.Tech CSE student (entering 5th semester)
-- College: Haldia Institute of Technology, West Bengal
-- Home state: Bihar
-- CGPA: 8.7/10
-- Interests: AI/ML, Computer Vision, Edge AI (Jetson), Agentic AI, LLMs, Deep Learning
-- Skills: Python, C++, FastAPI, Docker, YOLO, PyTorch, LangChain
-- Currently doing: FAST-SF fellowship at NIT Puducherry (edge AI surveillance)
-- Looking for: Government jobs (technical/IT cadre), internships (AI/ML/software),
-  scholarships, fellowships, hackathons, research opportunities, competitions
+- College: LNCT Bhopal, Madhya Pradesh
+- Interests: AI/ML, Software Development, Data Structures & Algorithms, Web Development
+- Skills: Python, C++, Java, SQL, HTML, CSS, JavaScript
+- Looking for: Software Engineering internships, AI/ML internships, hackathons,
+  scholarships, fellowships, research opportunities, coding competitions
 - NOT interested in: MBA, law, medical, agriculture, arts/humanities-only roles,
   sales/marketing/HR internships, content writing roles
 """

@@ -1,13 +1,19 @@
 """
 Unified Opportunity Bot
 -----------------------
-Fetches opportunities from multiple sources, classifies relevance using
+Fetches opportunities from 20+ sources, classifies relevance using
 Groq LLM, and sends matches to Telegram.
 
-WORKING SOURCES:
-1. FreeJobAlert RSS - Government jobs (verified working)
-2. Unstop API - Scholarships, Internships, Hackathons, Competitions (verified working)
-3. Devpost API - International Hackathons (verified working)
+SOURCES:
+  Govt Jobs    : FreeJobAlert RSS, JagranJosh scrape
+  Unstop API   : Scholarships, Internships, Hackathons, Competitions
+  Scholarships : ScholarshipsInIndia RSS, ScholarshipRoar RSS
+  Hackathons   : HackerEarth API, Devpost API, Codeforces API
+  Internships  : GitHub/Simplify, GitHub/speedyapply, foundit.in API, Internshala
+  New-Grad     : GitHub/Simplify New-Grad-Positions
+  Fellowships  : GovAI (governance.ai)
+  Global RSS   : OpportunitiesForYouth, OpportunitiesCircle, OpportunityDesk,
+                 OpportunityCell, Oyaop
 
 Requires env vars:
 - TELEGRAM_BOT_TOKEN
@@ -58,20 +64,41 @@ USER_PROFILE = """
 # UTILITIES
 # ============================================================
 
+SEEN_MAX_AGE = 30 * 86400  # Prune seen entries older than 30 days
+
+# Global error tracker — collects source failures for the Telegram error summary
+_source_errors = []
+
+
 def load_seen():
-    """Load previously seen opportunity hashes."""
+    """Load previously seen opportunity hashes.
+
+    Supports both old format (list of hashes) and new format
+    (dict mapping hash -> unix timestamp). Old format is auto-migrated.
+    Returns a dict {hash: timestamp}.
+    """
     try:
         with open(SEEN_FILE, "r") as f:
-            return set(json.load(f))
+            data = json.load(f)
+        if isinstance(data, list):
+            # Migrate old list format → dict with current timestamp
+            now = int(time.time())
+            return {h: now for h in data}
+        return data
     except (FileNotFoundError, json.JSONDecodeError):
-        return set()
+        return {}
 
 
-def save_seen(seen_set):
-    """Save seen hashes to file."""
+def save_seen(seen_dict):
+    """Save seen hashes to file, pruning entries older than SEEN_MAX_AGE."""
+    now = int(time.time())
+    pruned = {h: ts for h, ts in seen_dict.items() if now - ts < SEEN_MAX_AGE}
+    removed = len(seen_dict) - len(pruned)
+    if removed:
+        print(f"[INFO] Pruned {removed} seen entries older than 30 days")
     os.makedirs(os.path.dirname(SEEN_FILE), exist_ok=True)
     with open(SEEN_FILE, "w") as f:
-        json.dump(list(seen_set), f)
+        json.dump(pruned, f)
 
 
 def make_hash(text):
@@ -124,10 +151,15 @@ BLOCKLIST_KEYWORDS = [
     "chief of staff", "brand ambassador", "public relations",
     "fashion", "photography", "videography", "interior design",
     "accounting", "bpo", "influencer", "community manager",
+    "campus ambassador", "brand manager", "event management",
+    "supply chain", "civil engineering", "mechanical engineer",
+    "mbbs", "nursing", "pharmacy", "physiotherapy", "ayurved",
+    "chartered accountant", "company secretary", "law clerk",
 ]
 # Short/risky tokens: matched only as whole words (avoids e.g. "Sales" hitting
 # "Salesforce", or "ops" hitting "DevOps").
-BLOCKLIST_WORDS = ["hr", "bd", "mis", "pr", "ba", "sales", "seo", "accounts", "ops"]
+BLOCKLIST_WORDS = ["hr", "bd", "mis", "pr", "ba", "sales", "seo", "accounts", "ops",
+                   "ca", "llb", "mbbs"]
 
 
 def is_blocked(title):
@@ -141,19 +173,25 @@ def is_blocked(title):
     return False
 
 
-def fetch_url(url, headers=None):
-    """Fetch URL content with basic error handling."""
-    req = urllib.request.Request(url)
-    req.add_header("User-Agent", "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36")
-    if headers:
-        for k, v in headers.items():
-            req.add_header(k, v)
-    try:
-        with urllib.request.urlopen(req, timeout=30) as resp:
-            return resp.read().decode("utf-8", errors="ignore")
-    except Exception as e:
-        print(f"[ERROR] Failed to fetch {url}: {e}")
-        return ""
+def fetch_url(url, headers=None, retries=2, source_name=None):
+    """Fetch URL content with retry logic and error tracking."""
+    for attempt in range(1, retries + 1):
+        req = urllib.request.Request(url)
+        req.add_header("User-Agent", "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36")
+        if headers:
+            for k, v in headers.items():
+                req.add_header(k, v)
+        try:
+            with urllib.request.urlopen(req, timeout=30) as resp:
+                return resp.read().decode("utf-8", errors="ignore")
+        except Exception as e:
+            print(f"[ERROR] Failed to fetch {url} (attempt {attempt}/{retries}): {e}")
+            if attempt < retries:
+                time.sleep(3)
+    # All retries exhausted — track the error for the Telegram summary
+    label = source_name or url.split('/')[2]
+    _source_errors.append(label)
+    return ""
 
 
 def send_telegram(message):
@@ -685,7 +723,17 @@ def fetch_foundit():
     ]
     headers = {
         "Accept": "application/json, text/plain, */*",
+        "Accept-Language": "en-US,en;q=0.9",
+        "Accept-Encoding": "identity",
         "Referer": "https://www.foundit.in/search/jobs",
+        "Origin": "https://www.foundit.in",
+        "Sec-Fetch-Dest": "empty",
+        "Sec-Fetch-Mode": "cors",
+        "Sec-Fetch-Site": "same-origin",
+        "Sec-Ch-Ua": '"Chromium";v="120", "Google Chrome";v="120", "Not?A_Brand";v="99"',
+        "Sec-Ch-Ua-Mobile": "?0",
+        "Sec-Ch-Ua-Platform": '"Linux"',
+        "Connection": "keep-alive",
     }
 
     seen_ids = set()
@@ -775,6 +823,167 @@ def fetch_governance_ai():
 
 
 # ============================================================
+# SOURCE: Codeforces (upcoming coding contests)
+# ============================================================
+
+def fetch_codeforces():
+    """Fetch upcoming contests from the Codeforces public API."""
+    print("[INFO] Fetching upcoming contests from Codeforces...")
+    opportunities = []
+
+    content = fetch_url(
+        "https://codeforces.com/api/contest.list?gym=false",
+        source_name="Codeforces"
+    )
+    if not content:
+        return opportunities
+
+    try:
+        data = json.loads(content)
+        if data.get("status") != "OK":
+            return opportunities
+
+        for c in data.get("result", []):
+            if c.get("phase") != "BEFORE":
+                continue
+            name = c.get("name", "").strip()
+            cid = c.get("id", "")
+            start = c.get("startTimeSeconds", 0)
+
+            if not name:
+                continue
+
+            link = f"https://codeforces.com/contest/{cid}"
+            start_dt = datetime.fromtimestamp(start).strftime("%Y-%m-%d %H:%M") if start else ""
+
+            opportunities.append({
+                "source": "Codeforces",
+                "category": "COMPETITION",
+                "title": name,
+                "link": link,
+                "description": f"Starts: {start_dt}" if start_dt else "",
+                "date": start_dt
+            })
+    except json.JSONDecodeError as e:
+        print(f"[ERROR] Codeforces JSON error: {e}")
+
+    print(f"[INFO] Found {len(opportunities)} upcoming contests from Codeforces")
+    return opportunities
+
+
+# ============================================================
+# SOURCE: Internshala (India internships - HTML scrape)
+# ============================================================
+
+def fetch_internshala():
+    """Fetch tech internship listings from Internshala via JSON-LD structured data."""
+    print("[INFO] Fetching internships from Internshala...")
+    opportunities = []
+
+    pages = [
+        ("computer-science-internship", "CS"),
+        ("machine-learning-internship", "ML"),
+        ("python-django-internship", "Python/Django"),
+        ("web-development-internship", "Web Dev"),
+    ]
+
+    seen_links = set()
+    for slug, tag in pages:
+        url = f"https://internshala.com/internships/{slug}"
+        html = fetch_url(url, source_name="Internshala")
+        if not html:
+            continue
+
+        # Extract JSON-LD structured data (schema.org ItemList)
+        for m in re.finditer(
+            r'<script type="application/ld\+json">(.*?)</script>', html, re.S
+        ):
+            try:
+                data = json.loads(m.group(1))
+            except json.JSONDecodeError:
+                continue
+            if data.get("@type") != "ItemList":
+                continue
+
+            for item in data.get("itemListElement", [])[:20]:
+                title = item.get("name", "").strip()
+                link = item.get("url", "").strip()
+                if not (title and link) or link in seen_links:
+                    continue
+                seen_links.add(link)
+
+                opportunities.append({
+                    "source": "Internshala",
+                    "category": "INTERNSHIP",
+                    "title": title,
+                    "link": link,
+                    "description": tag,
+                    "date": ""
+                })
+            break  # Only need the first ItemList
+
+        time.sleep(1)  # Polite crawling
+
+    print(f"[INFO] Found {len(opportunities)} internships from Internshala")
+    return opportunities
+
+
+# ============================================================
+# SOURCE: Simplify New-Grad Positions (GitHub JSON)
+# ============================================================
+
+def fetch_github_newgrad():
+    """Fetch new-grad SWE positions from Simplify's community GitHub repo."""
+    print("[INFO] Fetching new-grad positions from GitHub/Simplify...")
+    opportunities = []
+
+    url = ("https://raw.githubusercontent.com/SimplifyJobs/"
+           "New-Grad-Positions/dev/.github/scripts/listings.json")
+    content = fetch_url(url, source_name="GitHub/Simplify-NewGrad")
+    if not content:
+        return opportunities
+
+    recent_window = 5 * 86400
+    now = time.time()
+
+    try:
+        listings = json.loads(content)
+    except json.JSONDecodeError as e:
+        print(f"[ERROR] Simplify New-Grad JSON error: {e}")
+        return opportunities
+
+    for item in listings:
+        if not item.get("active", False):
+            continue
+        if item.get("sponsorship", "") == "U.S. Citizenship is Required":
+            continue
+        updated = item.get("date_updated", 0)
+        if now - updated > recent_window:
+            continue
+
+        company = (item.get("company_name") or "").strip()
+        role = (item.get("title") or "").strip()
+        url_apply = (item.get("url") or "").strip()
+        if not (company and role and url_apply):
+            continue
+
+        locations = item.get("locations") or []
+        loc = ", ".join(locations[:2]) if locations else ""
+
+        opportunities.append({
+            "source": "GitHub/Simplify-NewGrad",
+            "category": "INTERNSHIP",
+            "title": f"{role} @ {company}",
+            "link": url_apply,
+            "description": f"New Grad | {loc}" if loc else "New Grad",
+            "date": datetime.fromtimestamp(updated).strftime("%Y-%m-%d") if updated else ""
+        })
+
+    print(f"[INFO] Found {len(opportunities)} new-grad positions from Simplify")
+    return opportunities
+
+
+# ============================================================
 # LLM CLASSIFICATION (Groq - free tier, llama-3.1-8b-instant)
 # ============================================================
 
@@ -804,30 +1013,50 @@ def keyword_relevance(opp):
     return any(kw in text for kw in RELEVANT_KEYWORDS)
 
 
+# Categories that are always relevant — skip LLM to save quota
+AUTO_APPROVE_CATEGORIES = {"HACKATHON", "COMPETITION", "SCHOLARSHIP", "FELLOWSHIP"}
+
+
 def classify_with_llm(opportunities):
     """Score each opportunity 0-10 for relevance to the user, keep those scoring
     >= MIN_RELEVANCE_SCORE, and return them sorted best-first (with `_score` set).
 
+    Categories in AUTO_APPROVE_CATEGORIES skip the LLM entirely (auto-score 7).
     Falls back to keyword_relevance() when the LLM is unavailable or errors out.
     """
     if not opportunities:
         return []
 
+    # --- Auto-approve obvious categories without burning LLM calls ---
+    auto_kept = []
+    needs_llm = []
+    for opp in opportunities:
+        if opp["category"] in AUTO_APPROVE_CATEGORIES:
+            opp["_score"] = 7
+            auto_kept.append(opp)
+        else:
+            needs_llm.append(opp)
+
+    if auto_kept:
+        print(f"[INFO] Auto-approved {len(auto_kept)} hackathons/competitions/"
+              f"scholarships/fellowships (skipped LLM)")
+
     if not GROQ_API_KEY:
         print("[WARN] No GROQ_API_KEY set. Using keyword fallback filter.")
-        kept = [o for o in opportunities if keyword_relevance(o)]
+        kept = [o for o in needs_llm if keyword_relevance(o)]
         for o in kept:
             o["_score"] = 0
-        return kept
+        return auto_kept + kept
 
-    print(f"[INFO] Scoring {len(opportunities)} opportunities with Groq LLM "
+    print(f"[INFO] Scoring {len(needs_llm)} opportunities with Groq LLM "
           f"(threshold {MIN_RELEVANCE_SCORE}/10)...")
+
 
     relevant = []
     batch_size = 15
 
-    for i in range(0, len(opportunities), batch_size):
-        batch = opportunities[i:i + batch_size]
+    for i in range(0, len(needs_llm), batch_size):
+        batch = needs_llm[i:i + batch_size]
 
         listings_text = ""
         for idx, opp in enumerate(batch):
@@ -921,11 +1150,13 @@ Include every number from the list."""
 
         time.sleep(2)  # Rate limiting between batches (free tier is strict)
 
-    # Sort best-first by score
-    relevant.sort(key=lambda o: o.get("_score", 0), reverse=True)
-    print(f"[INFO] LLM kept {len(relevant)} of {len(opportunities)} "
-          f"(score >= {MIN_RELEVANCE_SCORE})")
-    return relevant
+    # Merge auto-approved + LLM-approved, sort best-first
+    all_relevant = auto_kept + relevant
+    all_relevant.sort(key=lambda o: o.get("_score", 0), reverse=True)
+    print(f"[INFO] LLM kept {len(relevant)} of {len(needs_llm)} "
+          f"(score >= {MIN_RELEVANCE_SCORE}), "
+          f"+ {len(auto_kept)} auto-approved = {len(all_relevant)} total")
+    return all_relevant
 
 
 # ============================================================
@@ -996,7 +1227,7 @@ def send_category(category, items):
         send_telegram(msg)
 
 
-def send_digest(relevant, total_new):
+def send_digest(relevant, total_new, total_fetched=0):
     """Group opportunities by category and send a clean digest to Telegram."""
     grouped = {}
     for opp in relevant:
@@ -1017,13 +1248,22 @@ def send_digest(relevant, total_new):
         if cat in grouped:
             send_category(cat, grouped[cat])
 
+    # ---- Stats footer ----
+    footer_parts = [f"\U0001f4ca Fetched: {total_fetched}",
+                    f"New: {total_new}",
+                    f"Sent: {len(relevant)}"]
+    if _source_errors:
+        unique_errors = list(dict.fromkeys(_source_errors))  # dedupe, preserve order
+        footer_parts.append(f"\n\u26a0\ufe0f Failed: {', '.join(unique_errors[:5])}")
+    send_telegram(" \u00b7 ".join(footer_parts))
+
 
 def main():
     print("=" * 60)
     print(f"  OPPORTUNITY BOT RUN: {datetime.now().strftime('%Y-%m-%d %H:%M')}")
     print("=" * 60)
 
-    # Load previously seen
+    # Load previously seen (dict: hash -> timestamp)
     seen = load_seen()
     print(f"[INFO] Previously seen: {len(seen)} opportunities")
 
@@ -1063,18 +1303,26 @@ def main():
     # Devpost (International hackathons)
     all_opportunities.extend(fetch_devpost_hackathons())
 
+    # Codeforces (upcoming coding contests)
+    all_opportunities.extend(fetch_codeforces())
+
     # Community GitHub repos (structured JSON internship listings)
     all_opportunities.extend(fetch_github_internships())
     all_opportunities.extend(fetch_speedyapply_intl())
+    all_opportunities.extend(fetch_github_newgrad())
 
     # foundit.in (job board API - tech internships)
     all_opportunities.extend(fetch_foundit())
 
+    # Internshala (India's biggest internship platform)
+    all_opportunities.extend(fetch_internshala())
+
     # GovAI (governance.ai) - high-value AI governance fellowships
     all_opportunities.extend(fetch_governance_ai())
 
+    total_fetched = len(all_opportunities)
     print(f"\n{'='*60}")
-    print(f"[INFO] TOTAL FETCHED: {len(all_opportunities)}")
+    print(f"[INFO] TOTAL FETCHED: {total_fetched}")
     print(f"{'='*60}")
 
     # ---- Filter out junk (exam results, answer keys, admit cards, etc.) ----
@@ -1103,13 +1351,14 @@ def main():
     print(f"[INFO] Removed {before - len(all_opportunities)} cross-source duplicates. "
           f"Kept {len(all_opportunities)}")
 
-    # ---- Deduplicate against seen ----
+    # ---- Deduplicate against seen (now a dict: hash -> timestamp) ----
+    now_ts = int(time.time())
     new_opportunities = []
     for opp in all_opportunities:
         h = make_hash(opp["title"] + opp["link"])
         if h not in seen:
             new_opportunities.append(opp)
-            seen.add(h)
+            seen[h] = now_ts
 
     print(f"[INFO] New (unseen): {len(new_opportunities)}")
 
@@ -1128,7 +1377,7 @@ def main():
         return
 
     # ---- Send to Telegram (grouped category digest) ----
-    send_digest(relevant, len(new_opportunities))
+    send_digest(relevant, len(new_opportunities), total_fetched)
 
     # ---- Save updated seen list ----
     save_seen(seen)
@@ -1138,3 +1387,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+

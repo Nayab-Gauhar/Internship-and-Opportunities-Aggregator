@@ -5,7 +5,7 @@ Automated Telegram bot that finds government jobs, scholarships, fellowships, ha
 ## How it works
 
 ```
-SOURCES (12):
+SOURCES (20):
 ├── GOVT JOBS
 │   ├── FreeJobAlert RSS    → UPSC, SSC, Railway, PSU, State
 │   └── JagranJosh          → Recruitment notifications
@@ -13,23 +13,31 @@ SOURCES (12):
 ├── SCHOLARSHIPS
 │   ├── ScholarshipsInIndia → India scholarships
 │   └── ScholarshipRoar     → Global fully-funded scholarships
+├── INTERNSHIPS
+│   ├── Internshala         → India's largest internship platform
+│   ├── foundit.in API      → Tech internships (Monster India)
+│   └── GitHub/speedyapply  → International SWE internships
 ├── GLOBAL AGGREGATORS
 │   ├── OpportunitiesForYouth → Internships, fellowships, jobs
 │   ├── OpportunitiesCircle   → AI fellowships, tech scholarships
 │   ├── OpportunityDesk       → Fellowships, grants
 │   ├── OpportunityCell       → Engineering internships, stipend roles
 │   └── Oyaop                 → Scholarships, fellowships, competitions
-└── HACKATHONS
-    ├── HackerEarth API     → Hackathons + hiring challenges
-    └── Devpost API         → International hackathons
-GITHUB REPOS (community-maintained, structured JSON):
-    └── SimplifyJobs/Summer2026-Internships → tech internships (no scraping!)
+├── HACKATHONS & COMPETITIONS
+│   ├── HackerEarth API     → Hackathons + hiring challenges
+│   ├── Devpost API         → International hackathons
+│   └── Codeforces API      → Upcoming coding contests
+├── FELLOWSHIPS
+│   └── GovAI               → AI governance/policy fellowships
+└── GITHUB REPOS (community-maintained, structured JSON)
+    ├── SimplifyJobs/Summer2026-Internships → tech internships
+    └── SimplifyJobs/New-Grad-Positions     → new-grad SWE roles
          ↓
-    Fetch new listings (~170/run)
+    Fetch new listings (~250/run)
          ↓
-    Deduplicate (skip already notified)
+    Deduplicate (skip already notified, 30-day auto-prune)
          ↓
-    LLM Classification (Groq free tier - llama-3.1-8b)
+    LLM Classification (Groq free tier - llama-3.1-70b)
     "Is this relevant for a 3rd year CSE student interested in AI/ML?"
          ↓
     Send relevant ones → Telegram

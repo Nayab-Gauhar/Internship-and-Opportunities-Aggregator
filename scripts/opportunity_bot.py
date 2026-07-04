@@ -35,7 +35,7 @@ TELEGRAM_CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID", "").strip()
 GROQ_API_KEY = os.environ.get("GROQ_API_KEY", "").strip()
 
 # Groq model - update here if the model gets deprecated (see https://console.groq.com/docs/models)
-GROQ_MODEL = os.environ.get("GROQ_MODEL", "llama-3.1-8b-instant").strip()
+GROQ_MODEL = os.environ.get("GROQ_MODEL", "llama-3.1-70b-instant").strip()
 
 # Minimum LLM relevance score (0-10) for an opportunity to be sent. Higher = stricter.
 MIN_RELEVANCE_SCORE = int(os.environ.get("MIN_RELEVANCE_SCORE", "6"))

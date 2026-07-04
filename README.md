@@ -5,18 +5,20 @@ Automated Telegram bot that finds government jobs, scholarships, fellowships, ha
 ## How it works
 
 ```
-SOURCES (20):
+SOURCES (25):
 ├── GOVT JOBS
-│   ├── FreeJobAlert RSS    → UPSC, SSC, Railway, PSU, State
-│   └── JagranJosh          → Recruitment notifications
-├── UNSTOP API              → Scholarships, Internships, Hackathons, Competitions
+│   ├── SarkariResult         → State/Central Govt jobs
+│   ├── FreeJobAlert RSS      → UPSC, SSC, Railway, PSU, State
+│   └── JagranJosh            → Recruitment notifications
+├── UNSTOP API                → Scholarships, Internships, Hackathons, Competitions
 ├── SCHOLARSHIPS
-│   ├── ScholarshipsInIndia → India scholarships
-│   └── ScholarshipRoar     → Global fully-funded scholarships
+│   ├── ScholarshipsInIndia   → India scholarships
+│   └── ScholarshipRoar       → Global fully-funded scholarships
 ├── INTERNSHIPS
-│   ├── Internshala         → India's largest internship platform
-│   ├── foundit.in API      → Tech internships (Monster India)
-│   └── GitHub/speedyapply  → International SWE internships
+│   ├── AICTE Internship      → Govt internship portal
+│   ├── Internshala           → India's largest internship platform
+│   ├── foundit.in API        → Tech internships (Monster India)
+│   └── GitHub/speedyapply    → International SWE internships
 ├── GLOBAL AGGREGATORS
 │   ├── OpportunitiesForYouth → Internships, fellowships, jobs
 │   ├── OpportunitiesCircle   → AI fellowships, tech scholarships
@@ -24,16 +26,19 @@ SOURCES (20):
 │   ├── OpportunityCell       → Engineering internships, stipend roles
 │   └── Oyaop                 → Scholarships, fellowships, competitions
 ├── HACKATHONS & COMPETITIONS
-│   ├── HackerEarth API     → Hackathons + hiring challenges
-│   ├── Devpost API         → International hackathons
-│   └── Codeforces API      → Upcoming coding contests
+│   ├── MyGov                 → Govt campaigns and competitions
+│   ├── Devfolio              → Web3/Community hackathons
+│   ├── HackerEarth API       → Hackathons + hiring challenges
+│   ├── Devpost API           → International hackathons
+│   └── Codeforces API        → Upcoming coding contests
 ├── FELLOWSHIPS
-│   └── GovAI               → AI governance/policy fellowships
+│   ├── ISTI Portal           → Govt fellowships & research funding
+│   └── GovAI                 → AI governance/policy fellowships
 └── GITHUB REPOS (community-maintained, structured JSON)
     ├── SimplifyJobs/Summer2026-Internships → tech internships
     └── SimplifyJobs/New-Grad-Positions     → new-grad SWE roles
          ↓
-    Fetch new listings (~250/run)
+    Fetch new listings (~300/run)
          ↓
     Deduplicate (skip already notified, 30-day auto-prune)
          ↓

@@ -174,7 +174,12 @@ def is_blocked(title):
 
 
 def fetch_url(url, headers=None, retries=2, source_name=None):
-    """Fetch URL content with retry logic and error tracking."""
+    """Fetch URL content with retry logic, error tracking, and permissive SSL (for govt sites)."""
+    import ssl
+    ctx = ssl.create_default_context()
+    ctx.check_hostname = False
+    ctx.verify_mode = ssl.CERT_NONE
+
     for attempt in range(1, retries + 1):
         req = urllib.request.Request(url)
         req.add_header("User-Agent", "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36")
@@ -182,7 +187,7 @@ def fetch_url(url, headers=None, retries=2, source_name=None):
             for k, v in headers.items():
                 req.add_header(k, v)
         try:
-            with urllib.request.urlopen(req, timeout=30) as resp:
+            with urllib.request.urlopen(req, context=ctx, timeout=30) as resp:
                 return resp.read().decode("utf-8", errors="ignore")
         except Exception as e:
             print(f"[ERROR] Failed to fetch {url} (attempt {attempt}/{retries}): {e}")
@@ -984,6 +989,199 @@ def fetch_github_newgrad():
 
 
 # ============================================================
+# SOURCE: Sarkari Result (Government Jobs)
+# ============================================================
+
+def fetch_sarkari_result():
+    """Scrape the latest jobs from Sarkari Result."""
+    print("[INFO] Fetching latest jobs from Sarkari Result...")
+    opportunities = []
+
+    html = fetch_url("https://www.sarkariresult.com/", source_name="SarkariResult")
+    if not html:
+        return opportunities
+
+    # Look for links in the "Latest Jobs" box, which typically have a year in the path
+    links = re.findall(r'<a href="(https://www\.sarkariresult\.com/\d+/[^"]+)"[^>]*>(.*?)</a>', html)
+    if not links:
+        # Fallback to category links
+        links = re.findall(r'<a href="(https://www\.sarkariresult\.com/[a-z]+/[^"]+)"[^>]*>(.*?)</a>', html)
+
+    seen = set()
+    for link, title in links:
+        title = re.sub(r'<[^>]+>', '', title).strip()
+        if not title or link in seen:
+            continue
+        seen.add(link)
+        
+        # Stop collecting after we get a reasonable batch of recent jobs
+        if len(opportunities) >= 20:
+            break
+
+        opportunities.append({
+            "source": "SarkariResult",
+            "category": "GOVT_JOB",
+            "title": title,
+            "link": link,
+            "description": "Sarkari Result Latest Job",
+            "date": ""
+        })
+
+    print(f"[INFO] Found {len(opportunities)} jobs from Sarkari Result")
+    return opportunities
+
+
+# ============================================================
+# SOURCE: Devfolio (Community Hackathons)
+# ============================================================
+
+def fetch_devfolio():
+    """Scrape upcoming hackathons from Devfolio."""
+    print("[INFO] Fetching hackathons from Devfolio...")
+    opportunities = []
+
+    html = fetch_url("https://devfolio.co/hackathons", source_name="Devfolio")
+    if not html:
+        return opportunities
+
+    # Devfolio slugs look like href="https://<slug>.devfolio.co/"
+    slugs = re.findall(r'href="https://([a-z0-9\-]+)\.devfolio\.co/?"', html)
+    
+    seen = set()
+    for slug in slugs:
+        if slug in seen:
+            continue
+        seen.add(slug)
+        
+        # Filter out common false-positives
+        if slug in ("www", "api", "blog", "sponsor"):
+            continue
+
+        opportunities.append({
+            "source": "Devfolio",
+            "category": "HACKATHON",
+            "title": f"Devfolio: {slug.replace('-', ' ').title()}",
+            "link": f"https://{slug}.devfolio.co/",
+            "description": "Devfolio Hackathon",
+            "date": ""
+        })
+
+    print(f"[INFO] Found {len(opportunities)} hackathons from Devfolio")
+    return opportunities
+
+
+# ============================================================
+# SOURCE: AICTE Internship Portal
+# ============================================================
+
+def fetch_aicte_internships():
+    """Scrape the AICTE internship portal for tech/AI opportunities."""
+    print("[INFO] Fetching internships from AICTE...")
+    opportunities = []
+
+    html = fetch_url("https://internship.aicte-india.org/", source_name="AICTE")
+    if not html:
+        return opportunities
+
+    # Very naive scrape since the portal is heavily dynamic, we just grab links that have "internship"
+    links = re.findall(r'href="(https://internship\.aicte-india\.org/[^"]+)"', html)
+    
+    seen = set()
+    for link in links:
+        if "internship" not in link.lower() or link in seen:
+            continue
+        seen.add(link)
+
+        opportunities.append({
+            "source": "AICTE",
+            "category": "INTERNSHIP",
+            "title": "AICTE Internship Opportunity",
+            "link": link,
+            "description": "Check the AICTE portal for details.",
+            "date": ""
+        })
+        
+        if len(opportunities) >= 5: # Just grab a few top ones
+            break
+
+    print(f"[INFO] Found {len(opportunities)} internship links from AICTE")
+    return opportunities
+
+
+# ============================================================
+# SOURCE: ISTI Portal (Fellowships)
+# ============================================================
+
+def fetch_isti_portal():
+    """Scrape the ISTI portal for fellowships and research funding."""
+    print("[INFO] Fetching fellowships from ISTI Portal...")
+    opportunities = []
+
+    html = fetch_url("https://www.indiascienceandtechnology.gov.in/listingpage/internships", source_name="ISTI")
+    if not html:
+        return opportunities
+
+    # Extract Drupal node links (typical for ISTI)
+    titles = re.findall(r'<span class="field-content"><a href="(/node/\d+)">([^<]+)</a></span>', html)
+    if not titles:
+        titles = re.findall(r'<a href="(/node/\d+)">([^<]+)</a>', html)
+        
+    seen = set()
+    for link, title in titles:
+        if link in seen or not title.strip():
+            continue
+        seen.add(link)
+
+        opportunities.append({
+            "source": "ISTI",
+            "category": "FELLOWSHIP",
+            "title": title.strip(),
+            "link": f"https://www.indiascienceandtechnology.gov.in{link}",
+            "description": "ISTI Fellowship/Internship",
+            "date": ""
+        })
+
+    print(f"[INFO] Found {len(opportunities)} fellowships from ISTI")
+    return opportunities
+
+
+# ============================================================
+# SOURCE: MyGov (Campaigns / Competitions)
+# ============================================================
+
+def fetch_mygov():
+    """Scrape MyGov for active competitions, quizzes, and tasks."""
+    print("[INFO] Fetching competitions from MyGov...")
+    opportunities = []
+
+    html = fetch_url("https://www.mygov.in/", source_name="MyGov")
+    if not html:
+        return opportunities
+
+    # Find links on the page that belong to innovateindia, quiz, or task
+    links = re.findall(r'<a href="(https://(?:innovateindia|quiz|task)\.mygov\.in/[^"]+)"[^>]*>(.*?)</a>', html)
+    
+    seen = set()
+    for link, title in links:
+        title = re.sub(r'<[^>]+>', '', title).strip()
+        if link in seen or not title:
+            continue
+        seen.add(link)
+
+        opportunities.append({
+            "source": "MyGov",
+            "category": "COMPETITION",
+            "title": f"MyGov: {title}",
+            "link": link,
+            "description": "Govt of India Campaign/Competition",
+            "date": ""
+        })
+
+    print(f"[INFO] Found {len(opportunities)} competitions from MyGov")
+    return opportunities
+
+
+# ============================================================
 # LLM CLASSIFICATION (Groq - free tier, llama-3.1-8b-instant)
 # ============================================================
 
@@ -1258,6 +1456,28 @@ def send_digest(relevant, total_new, total_fetched=0):
     send_telegram(" \u00b7 ".join(footer_parts))
 
 
+def send_monthly_reminders():
+    """Send a monthly static reminder for decentralized / unscrapeable portals."""
+    # Only run on the 1st of the month
+    if datetime.now().day != 1:
+        return
+
+    msg = (
+        "\U0001f4c2 <b>Monthly Manual Check Reminder</b>\n\n"
+        "Some portals are decentralized, require logins, or block automated bots. Please check these manually:\n\n"
+        "• <b>DRDO</b>: Check CAIR/DYSL-AI lab sites or email them\n"
+        "• <b>ISRO</b>: Check SAC, NRSC, and IIRS portals\n"
+        "• <b>myScheme & NSP</b>: Check for new state/central scholarships\n"
+        "• <b>PM Internship</b>: pminternship.mca.gov.in\n"
+        "• <b>NITI Aayog</b>: workforindia.niti.gov.in\n"
+        "• <b>IndiaAI</b>: fellowship.indiaai.gov.in\n"
+        "• <b>iDEX</b>: Defence Innovation (idex.gov.in)\n"
+        "• <b>Bihar SCC</b>: 7nishchay-yuvaupmission.bihar.gov.in\n"
+        "• <b>Smart India Hackathon</b>: sih.gov.in"
+    )
+    send_telegram(msg)
+
+
 def main():
     print("=" * 60)
     print(f"  OPPORTUNITY BOT RUN: {datetime.now().strftime('%Y-%m-%d %H:%M')}")
@@ -1319,6 +1539,24 @@ def main():
 
     # GovAI (governance.ai) - high-value AI governance fellowships
     all_opportunities.extend(fetch_governance_ai())
+
+    # Sarkari Result (latest govt jobs)
+    all_opportunities.extend(fetch_sarkari_result())
+
+    # Devfolio (Web3 / Community hackathons)
+    all_opportunities.extend(fetch_devfolio())
+
+    # AICTE Internships
+    all_opportunities.extend(fetch_aicte_internships())
+
+    # ISTI Portal (Fellowships)
+    all_opportunities.extend(fetch_isti_portal())
+
+    # MyGov (Govt Campaigns/Competitions)
+    all_opportunities.extend(fetch_mygov())
+
+    # Trigger static reminders on the 1st of the month
+    send_monthly_reminders()
 
     total_fetched = len(all_opportunities)
     print(f"\n{'='*60}")

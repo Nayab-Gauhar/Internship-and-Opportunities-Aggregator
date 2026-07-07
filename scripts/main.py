@@ -18,9 +18,9 @@ from core.config import (
 )
 from core.utils import (
     load_seen, save_seen, make_hash, normalize_key, is_junk, is_blocked,
-    is_geo_ineligible, keyword_relevance, _source_errors,
+    should_drop_geo, keyword_relevance, _source_errors,
 )
-from core.telegram import send_digest, send_monthly_reminders
+from core.telegram import send_digest, send_monthly_reminders, send_flagship_reminders
 from scrapers import govt, hackathons, internships, scholarships, fellowships
 
 
@@ -35,7 +35,9 @@ def _build_sources():
         # ---- Government jobs ----
         ("FreeJobAlert", govt.fetch_govt_jobs),
         ("JagranJosh", govt.fetch_jagranjosh),
-        ("SarkariResult", govt.fetch_sarkari_result),
+        # SarkariResult DISABLED: Cloudflare blocks GitHub Actions' datacenter IP
+        # (403); redundant with FreeJobAlert + JagranJosh. Re-enable if running
+        # from a non-blocked IP.  ("SarkariResult", govt.fetch_sarkari_result),
         ("MyGov", govt.fetch_mygov),
 
         # ---- Unstop (scholarships, internships, hackathons, competitions) ----
@@ -52,8 +54,8 @@ def _build_sources():
             "https://opportunitiesforyouth.org/feed/", "OpportunitiesForYouth")),
         ("OpportunitiesCircle", lambda: scholarships.fetch_generic_rss(
             "https://opportunitiescircle.com/feed/", "OpportunitiesCircle")),
-        ("OpportunityDesk", lambda: scholarships.fetch_generic_rss(
-            "https://opportunitydesk.org/feed/", "OpportunityDesk")),
+        # OpportunityDesk DISABLED: Cloudflare blocks GitHub Actions IP (403);
+        # covered by the other aggregators. ("OpportunityDesk", lambda: ...)
         ("ScholarshipRoar", lambda: scholarships.fetch_generic_rss(
             "https://scholarshiproar.com/feed/", "ScholarshipRoar")),
         ("OpportunityCell", lambda: scholarships.fetch_generic_rss(
@@ -62,7 +64,9 @@ def _build_sources():
             "https://oyaop.com/feed/", "Oyaop")),
 
         # ---- Hackathons & competitions ----
-        ("HackerEarth", hackathons.fetch_hackerearth),
+        # HackerEarth DISABLED: Cloudflare blocks GitHub Actions IP (403);
+        # hackathons covered by Devfolio + Unstop + Devpost.
+        # ("HackerEarth", hackathons.fetch_hackerearth),
         ("Devpost", hackathons.fetch_devpost_hackathons),
         ("Codeforces", hackathons.fetch_codeforces),
         ("Devfolio", hackathons.fetch_devfolio),
@@ -77,7 +81,8 @@ def _build_sources():
 
         # ---- Fellowships ----
         ("GovAI", fellowships.fetch_governance_ai),
-        ("ISTI", fellowships.fetch_isti_portal),
+        # ISTI DISABLED: portal is now JS-rendered — listings aren't in the
+        # static HTML, so nothing to scrape. ("ISTI", fellowships.fetch_isti_portal),
     ]
 
 
@@ -157,10 +162,10 @@ OPPORTUNITIES:
 {listings_text}
 
 SCORING GUIDE:
-- 9-10: Perfect fit (AI/ML, software, data science, CS research, tech fellowship/scholarship matching their skills) AND open to an Indian student / India-based / remote / global.
-- 6-8: Good fit (general software/engineering/tech role, coding hackathon, eligible engineering scholarship) that an Indian 2028 graduate can actually apply to.
-- 3-5: Weak/uncertain fit (tangentially technical, or eligibility unclear)
-- 0-2: Not relevant. Score here if ANY apply: non-tech (sales/marketing/HR/content/management/case-study/journalism/MBA/medical/law); restricted to another country's citizens/residents or ONSITE in a foreign country (US/UK/Canada/Nigeria/EU etc.) and not remote/open-to-Indians; full-time new-grad/entry-level needing graduation in 2025/2026/2027 or a completed degree (student graduates in 2028); needs Master's/PhD or years of experience.
+- 9-10: Perfect fit (open-source program like GSoC/MLH/LFX, AI/ML, software, data, CS research, tech fellowship/scholarship) that an Indian 2028 undergrad can apply to (India, remote, or abroad-with-relocation).
+- 6-8: Good fit (general software/engineering/tech role or program, coding hackathon, eligible tech scholarship, academy/mentorship program for pre-final-year students).
+- 3-5: Weak/uncertain fit (tangentially technical, or eligibility unclear).
+- 0-2: Not relevant. Score here if ANY apply: non-tech (sales/marketing/HR/content/management/case-study/journalism/MBA/medical/law); restricted to another country's citizens/residents or requires work authorization the student lacks; full-time/senior/"new grad" role needing graduation in 2025/2026/2027 or a completed degree (student graduates in 2028); needs Master's/PhD or years of experience; EXCLUSIVELY for women or reserved ONLY for SC/ST/OBC/EWS (the student is male, General category).
 
 Respond with ONLY a JSON object mapping each opportunity number to its score:
 {{"scores": {{"1": 9, "2": 2, "3": 7}}}}
@@ -255,6 +260,7 @@ def main():
 
     # Trigger static reminders on the 1st of the month
     send_monthly_reminders()
+    send_flagship_reminders()
 
     total_fetched = len(all_opportunities)
     print(f"\n{'='*60}")
@@ -273,12 +279,13 @@ def main():
     print(f"[INFO] Removed {before - len(all_opportunities)} blocklisted listings "
           f"(marketing/sales/HR/content/etc.). Kept {len(all_opportunities)}")
 
-    # ---- Geo/eligibility filter (drop roles onsite in / locked to a foreign
-    #      country; keep India + remote/online/global/open-to-all) ----
+    # ---- Geo/eligibility filter — ONLY for onsite jobs (internships/govt).
+    #      Fellowships/scholarships/competitions/hackathons are kept worldwide
+    #      because the student is open to relocation and wants global programs. ----
     before = len(all_opportunities)
-    all_opportunities = [o for o in all_opportunities if not is_geo_ineligible(o)]
-    print(f"[INFO] Removed {before - len(all_opportunities)} geo-ineligible listings "
-          f"(foreign-only / non-India onsite). Kept {len(all_opportunities)}")
+    all_opportunities = [o for o in all_opportunities if not should_drop_geo(o)]
+    print(f"[INFO] Removed {before - len(all_opportunities)} geo-ineligible onsite jobs "
+          f"(foreign-only internships/govt). Kept {len(all_opportunities)}")
 
     # ---- Cross-source dedup (same role appearing on multiple sources) ----
     before = len(all_opportunities)

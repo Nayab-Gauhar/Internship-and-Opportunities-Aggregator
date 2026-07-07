@@ -137,3 +137,70 @@ def send_monthly_reminders():
         "• <b>Smart India Hackathon</b>: sih.gov.in"
     )
     send_telegram(msg)
+
+
+# ============================================================
+# FLAGSHIP PROGRAMS REMINDER (open-source / academy / fellowships)
+# ============================================================
+# These programs are annual and decentralized (own portals, no scrapeable feed),
+# so instead of scraping we send a month-aware reminder that highlights the ones
+# whose application window is typically open around now. All are open to
+# undergrads and (unless noted) open to everyone — filtered for a male/General,
+# India-based CSE student who is open to relocation.
+#   Tuple: (name, url, {application months}, note)
+FLAGSHIP_PROGRAMS = [
+    ("Google Summer of Code (GSoC)", "https://summerofcode.withgoogle.com/",
+     {2, 3, 4}, "Paid remote OSS. Orgs ~Feb, contributor proposals ~Mar–Apr. Open to all 18+."),
+    ("Summer of Bitcoin", "https://www.summerofbitcoin.org/",
+     {1, 2, 3}, "Paid remote OSS internship. Apps ~Feb–Mar."),
+    ("LFX Mentorship (Linux Foundation)", "https://mentorship.lfx.linuxfoundation.org/",
+     {1, 2, 4, 5, 7, 8}, "Paid remote OSS, 3 terms/yr (Spring/Summer/Fall). Open to all."),
+    ("MLH Fellowship", "https://fellowship.mlh.io/",
+     {2, 3, 4, 6, 7, 8, 9, 10}, "Remote SWE/OSS fellowship, rolling batches. Stipend."),
+    ("C4GT — Code for GovTech (India)", "https://www.codeforgovtech.in/",
+     {4, 5, 6}, "India OSS-for-government program. Apps ~May–Jun."),
+    ("GSSoC — GirlScript Summer of Code", "https://gssoc.girlscript.tech/",
+     {4, 5}, "Beginner-friendly OSS (open to all genders). Registrations ~Apr–May."),
+    ("Microsoft Engage", "https://careers.microsoft.com/students",
+     {2, 3, 4}, "Mentorship program for pre-final-year students. Apps ~Feb–Apr."),
+    ("Goldman Sachs Engineering programs", "https://www.goldmansachs.com/careers/students/",
+     {1, 2, 8, 9}, "Engineering Possibilities / early-career programs for pre-final years."),
+    ("JPMorgan Code for Good", "https://careers.jpmorgan.com/us/en/students/programs",
+     {1, 2, 7, 8}, "Hackathon → internship pipeline for students."),
+    ("Hacktoberfest", "https://hacktoberfest.com/",
+     {9, 10}, "Global OSS contribution drive every October. Open to all."),
+    ("Season of KDE", "https://season.kde.org/",
+     {12, 1}, "Beginner-friendly OSS mentorship. Apps ~Dec–Jan."),
+]
+
+
+def send_flagship_reminders(force=False):
+    """Send a month-aware reminder of flagship open-source / academy / fellowship
+    programs. Runs on the 1st of the month (or any time when force=True)."""
+    now = datetime.now()
+    if not force and now.day != 1:
+        return
+
+    this_month = now.month
+    next_month = (this_month % 12) + 1
+    opening = [p for p in FLAGSHIP_PROGRAMS if {this_month, next_month} & p[2]]
+
+    msg = (
+        "\U0001f31f <b>Flagship Programs Watch</b>\n"
+        "<i>Open-source, academy & fellowship programs worth tracking</i>\n"
+        + "\u2501" * 18 + "\n"
+    )
+
+    if opening:
+        msg += "\n\U0001f525 <b>Likely open around now</b> (this/next month):\n"
+        for name, url, _months, note in opening:
+            msg += f"• <a href=\"{url}\">{esc(name)}</a> — {esc(note)}\n"
+
+    msg += "\n\U0001f4c5 <b>Full calendar</b> (apply when their window opens):\n"
+    for name, url, _months, _note in FLAGSHIP_PROGRAMS:
+        msg += f"• <a href=\"{url}\">{esc(name)}</a>\n"
+
+    msg += ("\n<i>Tip: bookmark these — most open once a year and fill fast. "
+            "GSoC & LFX are the highest-ROI (paid, remote, open to all).</i>")
+
+    send_telegram(msg)

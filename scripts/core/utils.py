@@ -209,6 +209,27 @@ def is_geo_ineligible(opp):
         return True
     return False
 
+
+# Onsite-job categories where a foreign-only location makes the listing
+# inapplicable (a 2028 Indian undergrad can't take an onsite US/UK SWE job).
+# Programs the student CAN pursue globally (they're open to relocation) are NOT
+# geo-filtered: fellowships, scholarships, competitions, hackathons, research.
+GEO_FILTERED_CATEGORIES = {"INTERNSHIP", "GOV JOB"}
+
+
+def should_drop_geo(opp):
+    """Category-gated geo filter.
+
+    Only drop foreign-only *jobs* (internships / govt jobs), which flood the
+    digest with roles the student can't realistically take. Fellowships,
+    scholarships, competitions and hackathons are kept regardless of location
+    because the student is open to relocation and wants global programs — the
+    LLM then judges eligibility from the profile.
+    """
+    if opp.get("category") not in GEO_FILTERED_CATEGORIES:
+        return False
+    return is_geo_ineligible(opp)
+
 # Realistic browser headers. Many sites (Cloudflare-fronted: SarkariResult,
 # OpportunityDesk, HackerEarth, foundit.in) return 403 to a bare/short urllib
 # User-Agent, so we present a full, current Chrome fingerprint by default.

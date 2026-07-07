@@ -18,7 +18,7 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")
 
 from core.utils import (  # noqa: E402
     is_junk, is_blocked, normalize_key, make_hash, keyword_relevance,
-    is_geo_ineligible, load_seen, save_seen,
+    is_geo_ineligible, should_drop_geo, load_seen, save_seen,
 )
 from core import config, utils  # noqa: E402
 from scrapers.scholarships import detect_category  # noqa: E402
@@ -127,6 +127,59 @@ class TestGeoIneligible(unittest.TestCase):
 
     def test_no_location_is_kept(self):
         self.assertFalse(is_geo_ineligible(self._opp("Data Science - Internship (Part Time)", "ML")))
+
+
+class TestShouldDropGeo(unittest.TestCase):
+    """Category-gated geo filter: only onsite jobs are geo-filtered; global
+    programs (fellowships/scholarships/competitions/hackathons) are kept."""
+
+    def test_foreign_internship_is_dropped(self):
+        self.assertTrue(should_drop_geo(
+            {"title": "SWE Intern @ Meta", "description": "Redmond, WA", "category": "INTERNSHIP"}))
+
+    def test_foreign_govjob_is_dropped(self):
+        self.assertTrue(should_drop_geo(
+            {"title": "Analyst", "description": "London, UK", "category": "GOV JOB"}))
+
+    def test_foreign_fellowship_is_kept(self):
+        # Student is open to relocation → keep global fellowships/programs.
+        self.assertFalse(should_drop_geo(
+            {"title": "Research Fellowship", "description": "Berlin, Germany", "category": "FELLOWSHIP"}))
+
+    def test_foreign_scholarship_and_competition_kept(self):
+        self.assertFalse(should_drop_geo(
+            {"title": "Fully Funded Scholarship", "description": "USA", "category": "SCHOLARSHIP"}))
+        self.assertFalse(should_drop_geo(
+            {"title": "Global Hackathon", "description": "San Francisco, CA", "category": "HACKATHON"}))
+
+    def test_india_internship_kept(self):
+        self.assertFalse(should_drop_geo(
+            {"title": "Backend Intern", "description": "Bengaluru", "category": "INTERNSHIP"}))
+
+
+class TestFlagshipReminder(unittest.TestCase):
+    def test_builds_and_sends_message(self):
+        from core import telegram
+        captured = []
+        orig = telegram.send_telegram
+        telegram.send_telegram = lambda m: captured.append(m)
+        try:
+            telegram.send_flagship_reminders(force=True)
+        finally:
+            telegram.send_telegram = orig
+        self.assertEqual(len(captured), 1)
+        msg = captured[0]
+        self.assertIn("Flagship Programs", msg)
+        self.assertIn("GSoC", msg)
+        self.assertIn("LFX", msg)
+
+    def test_all_programs_have_valid_shape(self):
+        from core.telegram import FLAGSHIP_PROGRAMS
+        self.assertGreaterEqual(len(FLAGSHIP_PROGRAMS), 5)
+        for name, url, months, note in FLAGSHIP_PROGRAMS:
+            self.assertTrue(name and url.startswith("http"))
+            self.assertTrue(months and all(1 <= m <= 12 for m in months))
+            self.assertTrue(note)
 
 
 class TestSeenStore(unittest.TestCase):

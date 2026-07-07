@@ -13,29 +13,39 @@ import os
 # ============================================================
 # Override with the USER_PROFILE env var to reuse the bot for someone else.
 USER_PROFILE = os.environ.get("USER_PROFILE", """
-- B.Tech Computer Science student in India, GRADUATING IN 2028
-  (currently entering 5th semester / 3rd year).
-- Nationality: Indian. Based in Bhopal, Madhya Pradesh, India. College: LNCT Bhopal.
-- Interests: AI/ML, Software Development, Data Structures & Algorithms, Web Development.
+- B.Tech Computer Science student in India, GRADUATING IN 2028 (entering 3rd year / 5th semester).
+- Nationality: Indian. Gender: Male. Category: General.
+- Based in Bhopal, India, but OPEN TO RELOCATION anywhere (India or abroad) for a good opportunity.
+- Interests: AI/ML, Software Development, DSA, Web Development, and ESPECIALLY OPEN-SOURCE
+  contribution programs.
 - Skills: Python, C++, Java, SQL, HTML, CSS, JavaScript.
-- Looking for: Software Engineering / AI-ML / Data internships (Summer 2027 or
-  off-cycle / remote), hackathons, coding competitions, tech scholarships,
-  and research / technology fellowships.
 
-- ELIGIBILITY RULES (very important — used to reject irrelevant listings):
-  * KEEP only opportunities that are open to Indian students / international
-    applicants, OR located in India, OR fully remote / online / virtual /
-    global / "open to all".
-  * REJECT opportunities restricted to another country's citizens or residents,
-    or that are onsite in a foreign country (e.g. US-only, UK-only, Canada-only,
-    Nigeria-only, EU-only onsite roles). Being Indian, I cannot take these.
-  * REJECT full-time "new grad" / entry-level roles that need graduation in
-    2025 / 2026 / 2027 or an already-completed degree — I graduate in 2028.
+- Actively wants a BROAD range of opportunities:
+  * Open-source mentorship programs (GSoC, MLH Fellowship, LFX Mentorship, C4GT, GSSoC, Summer of Bitcoin)
+  * Early-career / "academy" programs for pre-final-year students (Microsoft Engage, Goldman Sachs
+    Engineering, JPMorgan Code for Good)
+  * Software / AI-ML / Data internships (Summer 2027, remote, or off-cycle)
+  * Student fellowships, tech scholarships, research programs, summer schools
+  * Hackathons and coding competitions
+
+- ELIGIBILITY RULES (used to reject listings that do not fit):
+  * KEEP anything open to Indian / international / "open to all" applicants — in India, remote,
+    OR abroad (the student is willing to relocate).
+  * KEEP international fellowships, scholarships, summer schools, research and open-source programs
+    that accept international or Indian applicants.
+  * REJECT roles restricted to another country's citizens/residents (e.g. "US citizens only",
+    "must have UK work authorization").
+  * REJECT full-time / senior / "new grad" roles that require graduating in 2025/2026/2027 or an
+    already-completed degree — the student graduates in 2028 and wants internships/programs, not
+    full-time jobs.
   * REJECT roles requiring a Master's / PhD or years of work experience.
+  * The student is MALE / GENERAL category, so programs EXCLUSIVELY for women, or reserved ONLY for
+    SC/ST/OBC/EWS, are NOT eligible — do not surface women-only or reserved-category-only
+    scholarships/fellowships.
 
-- NOT interested in: MBA / management, sales / marketing / HR, business /
-  case-study / strategy competitions, journalism, content writing,
-  finance / consulting, medical, law, agriculture, arts / humanities-only.
+- NOT interested in: MBA / management, sales / marketing / HR, business / case-study / strategy
+  competitions, journalism, content writing, finance / consulting, medical, law, agriculture,
+  arts / humanities-only.
 """).strip()
 
 # ============================================================

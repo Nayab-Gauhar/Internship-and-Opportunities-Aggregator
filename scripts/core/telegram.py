@@ -5,8 +5,42 @@ from core.utils import _source_errors
 TELEGRAM_BOT_TOKEN = os.getenv('TELEGRAM_BOT_TOKEN', '')
 TELEGRAM_CHAT_ID = os.getenv('TELEGRAM_CHAT_ID', '')
 
+CATEGORY_META = {
+    "INTERNSHIP":  ("\U0001f4bc", "Internships"),
+    "HACKATHON":   ("\U0001f680", "Hackathons"),
+    "COMPETITION": ("\U0001f3c6", "Competitions"),
+    "FELLOWSHIP":  ("\U0001f52c", "Fellowships"),
+    "SCHOLARSHIP": ("\U0001f393", "Scholarships"),
+    "GOV JOB":     ("\U0001f3db\ufe0f", "Government Jobs"),
+    "OPPORTUNITY": ("\U0001f4cc", "Other Opportunities"),
+}
+# Order in which categories appear in the digest (most relevant first)
+CATEGORY_ORDER = ["INTERNSHIP", "HACKATHON", "COMPETITION", "FELLOWSHIP",
+                  "SCHOLARSHIP", "GOV JOB", "OPPORTUNITY"]
 
+MAX_MSG_CHARS = 3500   # safe budget under Telegram's 4096-char per-message limit
 
+def esc(text):
+    """Escape HTML special chars for Telegram HTML parse mode."""
+    return text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+
+def format_item(index, opp):
+    """Format a single opportunity as a COMPACT one-line Telegram entry.
+
+    Layout:  N. <a href=link>Title</a> · meta · source
+    (meta = location/date if present). Keeps messages small so more items fit.
+    """
+    title = esc(opp["title"][:95])
+    # Highlight top matches (LLM score 9-10) with a star
+    star = "\u2b50 " if opp.get("_score", 0) >= 9 else ""
+    line = f"{index}. {star}<a href=\"{opp['link']}\">{title}</a>"
+
+    meta = opp.get("description") or opp.get("date") or ""
+    meta = esc(str(meta).strip()[:35])
+    if meta:
+        line += f" \u00b7 {meta}"
+    line += f" \u00b7 <i>{esc(opp['source'])}</i>\n"
+    return line
 def send_telegram(message):
     """Send a message to Telegram."""
     if not TELEGRAM_BOT_TOKEN or not TELEGRAM_CHAT_ID:
